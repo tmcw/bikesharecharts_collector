@@ -1,7 +1,11 @@
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::ipc::Timestamp;
 use arrow_array::builder::PrimitiveBuilder;
-use arrow_array::types::UInt16Type;
-use arrow_array::{ArrayRef, Date64Array, RecordBatch, UInt16Array};
+use arrow_array::types::{TimestampMillisecondType, TimestampSecondType, UInt16Type};
+use arrow_array::{
+    ArrayRef, Date64Array, RecordBatch, Time64MicrosecondArray, TimestampMillisecondArray,
+    TimestampSecondArray,
+};
 use flate2::bufread;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, Encoding};
@@ -55,7 +59,11 @@ fn main() {
     let num_bikes_available = Field::new("num_bikes_available", DataType::UInt16, false);
     let num_ebikes_available = Field::new("num_ebikes_available", DataType::UInt16, false);
     let num_docks_available = Field::new("num_docks_available", DataType::UInt16, false);
-    let times = Field::new("times", DataType::Date64, false);
+    let times = Field::new(
+        "times",
+        DataType::Timestamp(TimeUnit::Millisecond, None),
+        false,
+    );
 
     let mut id_legend: HashMap<String, u16> = HashMap::new();
     let mut id_counter: u16 = 0;
@@ -68,10 +76,7 @@ fn main() {
         times,
     ]);
 
-    let props = WriterProperties::builder()
-        .set_column_encoding(ColumnPath::from("times"), Encoding::DELTA_BINARY_PACKED)
-        .set_compression(Compression::UNCOMPRESSED)
-        .build();
+    let props = WriterProperties::builder().build();
 
     let mut writer = ArrowWriter::try_new(file, schema.into(), props.into()).unwrap();
 
@@ -86,18 +91,18 @@ fn main() {
             .filter(|station| station.station_status == "active")
             .collect();
 
-        let station_count = stations.len();
+        println!("Station count: {}", status.last_updated);
 
-        println!("Station count: {}", station_count);
-
-        let times: Date64Array = Date64Array::from(vec![status.last_updated; station_count]);
-
+        // Warning: You can specify Second here, and it won't work!
+        // https://github.com/apache/arrow-rs/issues/1920#issuecomment-1164220176
+        let mut times = PrimitiveBuilder::<TimestampMillisecondType>::new();
         let mut station_ids = PrimitiveBuilder::<UInt16Type>::new();
         let mut num_bikes_available = PrimitiveBuilder::<UInt16Type>::new();
         let mut num_ebikes_available = PrimitiveBuilder::<UInt16Type>::new();
         let mut num_docks_available = PrimitiveBuilder::<UInt16Type>::new();
 
         for station in &stations {
+            times.append_value(status.last_updated * 1000);
             let station_id = id_legend
                 .entry(station.station_id.clone().into())
                 .or_insert_with(|| {
@@ -124,7 +129,7 @@ fn main() {
                 "num_docks_available",
                 Arc::new(num_docks_available.finish()) as ArrayRef,
             ),
-            ("times", Arc::new(times) as ArrayRef),
+            ("time", Arc::new(times.finish()) as ArrayRef),
         ])
         .unwrap();
 
