@@ -16,3 +16,8 @@ reqwest = { version = "0.11", features = ["json"] }
 serde_json = "1.0"
 chrono = { version = "0.4" }
 arrow = "42.0.0"
+glob = "0.3.1"
+
+[dependencies.duckdb]
+version = "0.8.1"
+features = ["bundled"]
